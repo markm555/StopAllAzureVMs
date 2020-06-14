@@ -1,0 +1,106 @@
+<#
+    .DESCRIPTION
+        An example runbook which stops all VMs in all Resource Groups with an exception list.  Only works on RM VMs.
+
+    .NOTES
+        AUTHOR: Mark Moore
+        LASTEDIT: May 1, 2016
+#>
+
+
+<#
+
+    .Description
+	This section is requeired for Authentication to your Azure account from within an Azure Automation script.
+
+#>
+$connectionName = "AzureRunAsConnection"
+try
+{
+    # Get the connection "AzureRunAsConnection "
+    $servicePrincipalConnection=Get-AutomationConnection -Name $connectionName         
+
+    "Logging in to Azure..."
+    Add-AzureRmAccount `
+        -ServicePrincipal `
+        -TenantId $servicePrincipalConnection.TenantId `
+        -ApplicationId $servicePrincipalConnection.ApplicationId `
+        -CertificateThumbprint $servicePrincipalConnection.CertificateThumbprint 
+}
+catch {
+    if (!$servicePrincipalConnection)
+    {
+        $ErrorMessage = "Connection $connectionName not found."
+        throw $ErrorMessage
+    } else{
+        Write-Error -Message $_.Exception
+        throw $_.Exception
+    }
+}
+
+<#
+     .Description
+	This section will enumerate all virtual machines in all resource groups and stop each VM
+#.
+
+$VMout = ""
+
+$RGs = Get-AzureRMResourceGroup
+foreach($RG in $RGs)
+{
+    $VMs = Get-AzureRmVM -ResourceGroupName $RG.ResourceGroupName
+    foreach($VM in $VMs)
+    {
+       $VMDetail = Get-AzureRmVM -ResourceGroupName $RG.ResourceGroupName -Name $VM.Name -Status
+
+          # Exception syntax for multiple machines is as follows:
+          # if ($vm.name -eq "U1" -or $vm.name -eq "Server2016")
+          # you can -or together multiple machines you want to leave running
+          
+          if (($vm.name -eq "Node32016") -or ($vm.name -eq "Node42016") -or ($vm.name -eq "SQL1"))
+          {
+             write-output $vm.name" skipped"
+          }
+          else
+          {
+             stop-azurermvm -name $vm.name -ResourceGroupName $RG.ResourceGroupName -Force
+          }
+    }
+}
+
+<#
+     .Description
+	This section sends email witht the status of all VMs in all resource groups
+#>
+
+Write-output "Sending Email"
+$VMout = ""
+
+$RGs = Get-AzureRMResourceGroup
+foreach($RG in $RGs)
+{
+    $VMs = Get-AzureRmVM -ResourceGroupName $RG.ResourceGroupName
+    foreach($VM in $VMs)
+    {
+        $VMDetail = Get-AzureRmVM -ResourceGroupName $RG.ResourceGroupName -Name $VM.Name -Status
+        foreach ($VMStatus in $VMDetail.Statuses)
+        {                            
+            $VMStatusDetail = $VMStatus.DisplayStatus
+        }
+        $VMout = $VMout + ($VM.Name +" "+ $VMStatusDetail+[Environment]::NewLine)
+
+    }
+}
+
+
+	$From = "<From email address>"
+	$To = "<To email address>"
+	$SMTPServer = "<smtp fqdn or IP address"
+	$SMTPPort = "<SMTP port number>"
+	$Username = "<Username if required>"
+	$Password = "<Password if required>"
+	$subject = "machine status after stop'"
+	$body = $Vmout
+	$smtp = New-Object System.Net.Mail.SmtpClient($SMTPServer, $SMTPPort); # $smtp.EnableSSL = $true
+	$smtp.Credentials = New-Object System.Net.NetworkCredential($Username, $Password);
+	$smtp.Send($From, $To, $subject, $body);
